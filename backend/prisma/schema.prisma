@@ -1,0 +1,378 @@
+// This is your Prisma schema file
+// Sistema de Farmacia POS - Bolivia (PostgreSQL)
+// IDs: autoincrement Int (estándar para sistemas empresariales locales)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================
+// USUARIOS Y ROLES
+// =============================================
+
+model User {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String   @unique
+  password     String
+  role         String   @default("CAJERO") // "ADMIN", "FARMACEUTICO", "CAJERO"
+  isActive     Boolean  @default(true)
+  permissions  Json     @default("{}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sales         Sale[]
+  purchases     Purchase[]
+  adjustments   InventoryAdjustment[]
+  cashRegisters CashRegister[]
+
+  @@map("users")
+}
+
+// =============================================
+// CATÁLOGOS BASE
+// =============================================
+
+model Category {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  products  Product[]
+
+  @@map("categories")
+}
+
+model Laboratory {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  products  Product[]
+
+  @@map("laboratories")
+}
+
+// =============================================
+// PRODUCTOS E INVENTARIO
+// =============================================
+
+model Product {
+  id                  Int       @id @default(autoincrement())
+  barcode             String?   @unique
+  internalCode        String    @unique
+  commercialName      String
+  genericName         String
+  categoryId          Int
+  laboratoryId        Int
+  pharmaceuticalForm  String
+  concentration       String?
+  activeIngredient    String?
+  measureUnit         String    @default("UNIDAD")
+  description         String?
+
+  // Precios
+  purchasePrice    Decimal   @default(0)
+  profitMargin     Decimal   @default(0)
+  salePrice1       Decimal   @default(0)  // Precio normal
+  salePrice2       Decimal   @default(0)  // Precio mayoreo
+  salePrice3       Decimal   @default(0)  // Precio especial
+  minDiscountPrice Decimal   @default(0)  // Precio límite descuento
+
+  // Control de stock
+  currentStock         Int     @default(0)
+  minStock             Int     @default(0)
+  requiresPrescription Boolean @default(false)
+  isActive             Boolean @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  category      Category            @relation(fields: [categoryId], references: [id])
+  laboratory    Laboratory          @relation(fields: [laboratoryId], references: [id])
+  lots          ProductLot[]
+  saleItems     SaleItem[]
+  purchaseItems PurchaseItem[]
+  adjustments   InventoryAdjustment[]
+  movements     InventoryMovement[]
+
+  @@map("products")
+}
+
+model ProductLot {
+  id             Int      @id @default(autoincrement())
+  productId      Int
+  lotNumber      String
+  expirationDate DateTime
+  quantity       Int      @default(0)
+  purchasePrice  Decimal
+  createdAt      DateTime @default(now())
+
+  product       Product      @relation(fields: [productId], references: [id])
+  saleItems     SaleItem[]
+  purchaseItems PurchaseItem[]
+
+  @@map("product_lots")
+}
+
+// =============================================
+// CLIENTES
+// =============================================
+
+model Customer {
+  id        Int      @id @default(autoincrement())
+  nit       String?  @unique
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sales Sale[]
+
+  @@map("customers")
+}
+
+// =============================================
+// VENTAS Y POS
+// =============================================
+
+model Sale {
+  id            Int      @id @default(autoincrement())
+  saleNumber    String   @unique
+  customerId    Int?
+  userId        Int
+  subtotal      Decimal
+  discount      Decimal  @default(0)
+  total         Decimal
+  paymentMethod String   // "EFECTIVO", "QR", "TARJETA", "MIXTO"
+  amountPaid    Decimal
+  change        Decimal  @default(0)
+  priceLevel    Int      @default(1)
+  status        String   @default("COMPLETADA") // "COMPLETADA", "ANULADA", "PENDIENTE"
+  notes         String?
+  cancelReason  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  customer     Customer?    @relation(fields: [customerId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+  items        SaleItem[]
+  cashMovement CashMovement?
+
+  @@map("sales")
+}
+
+model SaleItem {
+  id        Int     @id @default(autoincrement())
+  saleId    Int
+  productId Int
+  lotId     Int?
+  quantity  Int
+  unitPrice Decimal
+  discount  Decimal @default(0)
+  subtotal  Decimal
+
+  sale    Sale       @relation(fields: [saleId], references: [id])
+  product Product    @relation(fields: [productId], references: [id])
+  lot     ProductLot? @relation(fields: [lotId], references: [id])
+
+  @@map("sale_items")
+}
+
+// =============================================
+// PROVEEDORES Y COMPRAS
+// =============================================
+
+model Supplier {
+  id          Int      @id @default(autoincrement())
+  nit         String?  @unique
+  name        String
+  contactName String?
+  phone       String?
+  email       String?
+  address     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  purchases       Purchase[]
+  accountsPayable AccountsPayable[]
+
+  @@map("suppliers")
+}
+
+model Purchase {
+  id             Int      @id @default(autoincrement())
+  purchaseNumber String   @unique
+  supplierId     Int
+  userId         Int
+  invoiceNumber  String?
+  invoiceDate    DateTime?
+  subtotal       Decimal
+  tax            Decimal  @default(0)
+  total          Decimal
+  amountPaid     Decimal  @default(0)
+  status         String   @default("COMPLETADA")
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  supplier        Supplier         @relation(fields: [supplierId], references: [id])
+  user            User             @relation(fields: [userId], references: [id])
+  items           PurchaseItem[]
+  accountsPayable AccountsPayable?
+
+  @@map("purchases")
+}
+
+model PurchaseItem {
+  id         Int     @id @default(autoincrement())
+  purchaseId Int
+  productId  Int
+  lotId      Int?
+  quantity   Int
+  unitPrice  Decimal
+  subtotal   Decimal
+
+  purchase Purchase    @relation(fields: [purchaseId], references: [id])
+  product  Product     @relation(fields: [productId], references: [id])
+  lot      ProductLot? @relation(fields: [lotId], references: [id])
+
+  @@map("purchase_items")
+}
+
+model AccountsPayable {
+  id            Int      @id @default(autoincrement())
+  supplierId    Int
+  purchaseId    Int      @unique
+  totalAmount   Decimal
+  paidAmount    Decimal  @default(0)
+  pendingAmount Decimal
+  dueDate       DateTime?
+  isPaid        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  supplier  Supplier @relation(fields: [supplierId], references: [id])
+  purchase  Purchase @relation(fields: [purchaseId], references: [id])
+  payments  Payment[]
+
+  @@map("accounts_payable")
+}
+
+// =============================================
+// CUENTAS POR PAGAR — RELACIÓN SUPPLIER CORREGIDA
+// =============================================
+
+model Payment {
+  id               Int      @id @default(autoincrement())
+  accountPayableId Int
+  amount           Decimal
+  paymentMethod    String
+  notes            String?
+  createdAt        DateTime @default(now())
+
+  accountPayable AccountsPayable @relation(fields: [accountPayableId], references: [id])
+
+  @@map("payments")
+}
+
+// =============================================
+// KÁRDEX - MOVIMIENTOS DE INVENTARIO
+// =============================================
+
+model InventoryMovement {
+  id            Int      @id @default(autoincrement())
+  productId     Int
+  lotNumber     String?
+  movementType  String
+  quantity      Int
+  previousStock Int
+  currentStock  Int
+  unitPrice     Decimal?
+  referenceId   String?  // ID de venta, compra o ajuste (guardado como string)
+  referenceType String?  // "sale", "purchase", "adjustment"
+  notes         String?
+  userId        Int?
+  createdAt     DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("inventory_movements")
+}
+
+model InventoryAdjustment {
+  id         Int      @id @default(autoincrement())
+  productId  Int
+  userId     Int
+  adjustType String   // "ENTRADA" | "SALIDA"
+  quantity   Int
+  reason     String
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@map("inventory_adjustments")
+}
+
+// =============================================
+// CAJA Y FINANZAS
+// =============================================
+
+model CashRegister {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  openingAmount  Decimal
+  closingAmount  Decimal?
+  expectedAmount Decimal?
+  difference     Decimal?
+  status         String   @default("ABIERTA")
+  openedAt       DateTime @default(now())
+  closedAt       DateTime?
+  notes          String?
+
+  user      User          @relation(fields: [userId], references: [id])
+  movements CashMovement[]
+
+  @@map("cash_registers")
+}
+
+model CashMovement {
+  id             Int      @id @default(autoincrement())
+  cashRegisterId Int
+  saleId         Int?     @unique
+  type           String
+  amount         Decimal
+  description    String
+  createdAt      DateTime @default(now())
+
+  cashRegister CashRegister @relation(fields: [cashRegisterId], references: [id])
+  sale         Sale?        @relation(fields: [saleId], references: [id])
+
+  @@map("cash_movements")
+}
+
+// =============================================
+// CONFIGURACIÓN DEL SISTEMA
+// =============================================
+
+model SystemConfig {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("system_config")
+}
